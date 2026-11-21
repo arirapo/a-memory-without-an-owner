@@ -221,6 +221,10 @@ TRACES BETWEEN / A MEMORY WITHOUT AN OWNER
     Add one test pulse
   </button>
 
+  <button id="concurrent">
+  Test 20 simultaneous updates
+</button>
+
   <pre id="result">Ready.</pre>
 </section>
 </main>
@@ -267,6 +271,10 @@ document.getElementById('seed').onclick =
 
 document.getElementById('pulse').onclick =
   () => call('/api/memory/test-pulse','POST');
+
+document.getElementById('concurrent').onclick =
+  () => call('/api/memory/concurrency-test','POST');
+  
 </script>
 
 </body>
@@ -345,12 +353,15 @@ const server = http.createServer(async (req, res) => {
 
   // New memory storage API.
 
-  const memoryPaths = [
-    '/api/memory/state',
-    '/api/memory/initialize',
-    '/api/memory/test-pulse'
-  ];
 
+const memoryPaths = [
+  '/api/memory/state',
+  '/api/memory/initialize',
+  '/api/memory/test-pulse',
+  '/api/memory/concurrency-test'
+];
+
+  
   if (memoryPaths.includes(p)) {
 
     if (
@@ -399,10 +410,19 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
-    try {
-      const state =
-        p === '/api/memory/initialize'
-          ? await store.initialize()
+    if (p === '/api/memory/concurrency-test') {
+  const report = await store.concurrencyTest(20);
+
+  return json(res, report.passed ? 200 : 409, {
+    storage: store.mode,
+    report
+  });
+}
+
+const state =
+  p === '/api/memory/initialize'
+    ? await store.initialize()
+    : await store.testPulse();
           : await store.testPulse();
 
       return json(res, 200, {
