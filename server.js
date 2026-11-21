@@ -10,6 +10,7 @@ const crypto = require('node:crypto');
 const mysql = require('mysql2/promise');
 const store = require('./memory-store');
 const mpe05 = require('./mpe05');
+const backup09 = require('./mpe09-backup');
 
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_KEY = process.env.MPE_ADMIN_KEY || '';
@@ -148,6 +149,12 @@ No participant contributions are accepted yet.</p>
 
 <button id="retryTest">Test duplicate protection</button>
 <button class="secondary" id="backup">Inspect memory snapshot</button>
+<button id="backupDownload" class="secondary">
+Download Memory Backup
+</button>
+<button id="restoreDrill">
+Test Memory Restoration
+</button>
 <pre id="result">Ready.</pre>
 </section>
 </main>
@@ -203,6 +210,50 @@ document.getElementById('retryTest').onclick =
 document.getElementById('backup').onclick =
   () => call('/api/admin/backup', 'POST');
 
+async function downloadMemoryBackup() {
+  const key = document.getElementById('key');
+  const secret = key.value;
+  key.value = '';
+
+  output.textContent = 'Preparing memory backup…';
+
+  try {
+    const response = await fetch('/api/admin/backup09', {
+      method: 'POST',
+      cache: 'no-store',
+      headers: { 'X-MPE-Admin-Key': secret }
+    });
+
+    if (!response.ok) {
+      throw Error('HTTP ' + response.status);
+    }
+
+    const blob = await response.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+
+    a.href = url;
+    a.download = 'MPE-memory-backup.json';
+    document.body.append(a);
+    a.click();
+    a.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+    output.textContent = 'Backup download requested.';
+
+  } catch (e) {
+    output.textContent = 'Backup failed: ' + e.message;
+  }
+}
+
+document.getElementById('backupDownload').onclick =
+  downloadMemoryBackup;
+
+document.getElementById('restoreDrill').onclick =
+  () => call('/api/admin/restore09', 'POST');
+
+
+
 for (const [id, endpoint] of [
   ['mpeInit', 'init'],
   ['mpeView', 'view'],
@@ -240,7 +291,7 @@ const server = http.createServer(async (req, res) => {
   ) {
     return json(res, 200, {
       status: 'ok',
-      version: '0.8.0',
+      version: '0.9.0',
       startedAt,
       storage: store.mode
     });
@@ -403,6 +454,51 @@ const server = http.createServer(async (req, res) => {
     );
   }
 
+
+
+  if (
+    req.method === 'POST' &&
+    (p === '/api/admin/backup09' ||
+     p === '/api/admin/restore09')
+  ) {
+    if (!sameOrigin(req) || !authorized(req)) {
+      return json(res, 403, {
+        error: 'access_denied'
+      });
+    }
+
+    try {
+      if (p === '/api/admin/restore09') {
+        return json(
+          res, 200,
+          await backup09.restoreDrill()
+        );
+      }
+
+      const snapshot = await backup09.takeSnapshot();
+      const content = JSON.stringify(snapshot);
+
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'Content-Disposition':
+          'attachment; filename="MPE-memory-backup.json"',
+        'X-Content-Type-Options': 'nosniff'
+      });
+
+      return res.end(content);
+
+    } catch (error) {
+      console.error(
+        'MPE 0.9 backup:',
+        error.code || error.message
+      );
+
+      return json(res, 503, {
+        error: 'backup_or_restore_failed'
+      });
+    }
+  }
 
   if (req.method === 'POST' &&
       p === '/api/admin/backup') {
