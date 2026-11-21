@@ -212,6 +212,8 @@ function apply(s, action, value) {
       return s;
     }
     e.offer(value.features);
+  } else if (action === 'tick') {
+    e.tick();
   } else if (action === 'simulate') {
     e.simulate(value);
   } else if (action === 'age') {
@@ -325,20 +327,205 @@ function artworkState(memory) {
   };
 }
 
+
+async function receiptTables(db) {
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS mpe_offer_receipts (
+      memory_id VARCHAR(64) NOT NULL,
+      request_id CHAR(36) NOT NULL,
+      accepted_at VARCHAR(30) NOT NULL,
+      PRIMARY KEY(memory_id, request_id)
+    )
+  `);
+
+  await db.query(`
+    CREATE TABLE IF NOT EXISTS mpe_offer_rate (
+      memory_id VARCHAR(64) NOT NULL,
+      window_minute BIGINT NOT NULL,
+      counter INT NOT NULL,
+      PRIMARY KEY(memory_id, window_minute)
+    )
+  `);
+}
+
+// At most 30 accepted offerings per minute for
+// this whole experimental memory.
+// This does not depend on reverse-proxy IP headers.
+
 async function offer(features, id) {
-  const state = await change('offer', { features, id });
+  if (
+    !Array.isArray(features) ||
+    features.length !== 8 ||
+    !features.every(v =>
+      typeof v === 'number' &&
+      Number.isFinite(v) &&
+      v >= 0 && v <= 1
+    ) ||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)
+  ) {
+    throw Error('invalid_offer');
+  }
 
-  const receipt = state.acceptedRequests?.find(
-    r => r.id === id
-  );
+  // Development-only local storage.
+  // For production/gallery multi-process storage,
+  // SQLite or MySQL is required.
 
-  if (!receipt) throw Error('receipt_not_found');
+  if (!configured) {
+    return serialized(async () => {
+      const s = await localRead();
 
-  return {
-    accepted: true,
-    id: receipt.id,
-    at: receipt.at
-  };
+      if (!s) throw Error('not_initialized');
+
+      const previous = s.acceptedRequests?.find(
+        r => r.id === id
+      );
+
+      if (previous) {
+        return {
+          accepted: true,
+          id,
+          at: previous.at,
+          duplicate: true
+        };
+      }
+
+      const next = apply(s, 'offer', { features, id });
+      await saveLocal(next);
+
+      const receipt = next.acceptedRequests.find(
+        r => r.id === id
+      );
+
+      return {
+        accepted: true,
+        id,
+        at: receipt.at,
+        duplicate: false
+      };
+    });
+  }
+
+  const db = await connect();
+
+  try {
+    await table(db);
+    await receiptTables(db);
+    await db.beginTransaction();
+
+    // One lock protects the entire memory transition.
+    const [rows] = await db.execute(
+      'SELECT payload FROM mpe_memory_snapshots WHERE memory_id=? FOR UPDATE',
+      [ID]
+    );
+
+    if (!rows.length) {
+      throw Error('not_initialized');
+    }
+
+    const current = check(JSON.parse(rows[0].payload));
+
+    // Return original result for repeat submissions.
+    const [previous] = await db.execute(
+      'SELECT accepted_at FROM mpe_offer_receipts WHERE memory_id=? AND request_id=?',
+      [ID, id]
+    );
+
+    if (previous.length) {
+      await db.commit();
+
+      return {
+        accepted: true,
+        id,
+        at: previous[0].accepted_at,
+        duplicate: true
+      };
+    }
+
+    // Acknowledge legacy 0.7 receipt IDs too.
+    const legacy = current.acceptedRequests?.find(
+      r => r.id === id
+    );
+
+    if (legacy) {
+      await db.execute(
+        'INSERT INTO mpe_offer_receipts (memory_id,request_id,accepted_at) VALUES (?,?,?)',
+        [ID, id, legacy.at]
+      );
+
+      await db.commit();
+
+      return {
+        accepted: true,
+        id,
+        at: legacy.at,
+        duplicate: true
+      };
+    }
+
+    const minute = Math.floor(Date.now() / 60000);
+
+    await db.execute(
+      `INSERT INTO mpe_offer_rate
+       (memory_id,window_minute,counter)
+       VALUES (?,?,1)
+       ON DUPLICATE KEY UPDATE counter=counter+1`,
+      [ID, minute]
+    );
+
+    const [counts] = await db.execute(
+      'SELECT counter FROM mpe_offer_rate WHERE memory_id=? AND window_minute=?',
+      [ID, minute]
+    );
+
+    if (counts[0].counter > 30) {
+      const error = Error('rate_limit');
+      error.code = 'RATE_LIMIT';
+      throw error;
+    }
+
+    const next = apply(
+      current, 'offer', { features, id }
+    );
+
+    const stamp = new Date().toISOString();
+
+    await db.execute(
+      'UPDATE mpe_memory_snapshots SET revision=?,payload=? WHERE memory_id=?',
+      [next.revision, JSON.stringify(next), ID]
+    );
+
+    await db.execute(
+      'INSERT INTO mpe_offer_receipts (memory_id,request_id,accepted_at) VALUES (?,?,?)',
+      [ID, id, stamp]
+    );
+
+    await db.commit();
+
+    return {
+      accepted: true,
+      id,
+      at: stamp,
+      duplicate: false
+    };
+
+  } catch (error) {
+    await db.rollback().catch(() => {});
+    throw error;
+
+  } finally {
+    await db.end();
+  }
+}
+
+// Advance simulated time with the existing,
+// transaction-protected memory writer.
+
+async function tick() {
+  const current = await read();
+
+  if (!current) return null;
+
+  return change('tick');
 }
 
 module.exports = {
@@ -347,5 +534,6 @@ module.exports = {
   change,
   summary,
   artworkState,
-  offer
+  offer,
+  tick
 };

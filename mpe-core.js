@@ -557,8 +557,13 @@ function offer(features) {
   }
 }
 
+function tick() {
+  evolve();
+}
+
 return {
   currentState,
+  tick,
   offer,
   simulate,
   age,

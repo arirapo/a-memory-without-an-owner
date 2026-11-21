@@ -146,6 +146,8 @@ No participant contributions are accepted yet.</p>
 <button id="mpeSim">Simulate 10 traces</button>
 <button id="mpeAge">Advance 30 days</button>
 
+<button id="retryTest">Test duplicate protection</button>
+<button class="secondary" id="backup">Inspect memory snapshot</button>
 <pre id="result">Ready.</pre>
 </section>
 </main>
@@ -195,6 +197,12 @@ document.getElementById('pulse').onclick =
 document.getElementById('concurrent').onclick =
   () => call('/api/memory/concurrency-test', 'POST');
 
+document.getElementById('retryTest').onclick =
+  () => call('/api/admin/retry-test', 'POST');
+
+document.getElementById('backup').onclick =
+  () => call('/api/admin/backup', 'POST');
+
 for (const [id, endpoint] of [
   ['mpeInit', 'init'],
   ['mpeView', 'view'],
@@ -232,7 +240,7 @@ const server = http.createServer(async (req, res) => {
   ) {
     return json(res, 200, {
       status: 'ok',
-      version: '0.7.0',
+      version: '0.8.0',
       startedAt,
       storage: store.mode
     });
@@ -284,27 +292,22 @@ const server = http.createServer(async (req, res) => {
   }
 
 
+
   if (req.method === 'POST' && p === '/api/offer') {
     if (!sameOrigin(req)) {
       return json(res, 403, { error: 'origin_rejected' });
     }
 
-    const ip = req.socket.remoteAddress || 'unknown';
-    const now = Date.now();
-
-    const recent = (offerRates.get(ip) || [])
-      .filter(t => now - t < 60000);
-
-    if (recent.length >= 8) {
-      return json(res, 429, { error: 'too_many_offers' });
-    }
-
-    let body = '';
+    let input = '';
     let tooLarge = false;
 
     req.on('data', chunk => {
-      body += chunk;
-      if (body.length > 1024) tooLarge = true;
+      if (tooLarge) return;
+      if (Buffer.byteLength(input) + chunk.length > 1024) {
+        tooLarge = true;
+        return;
+      }
+      input += chunk.toString('utf8');
     });
 
     req.on('end', async () => {
@@ -317,7 +320,7 @@ const server = http.createServer(async (req, res) => {
       let data;
 
       try {
-        data = JSON.parse(body);
+        data = JSON.parse(input);
       } catch {
         return json(res, 400, {
           error: 'invalid_json'
@@ -327,39 +330,39 @@ const server = http.createServer(async (req, res) => {
       if (
         !data ||
         typeof data !== 'object' ||
-        'text' in data ||
-        'original' in data ||
-        'raw' in data ||
-        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-          .test(data.id || '') ||
-        !Array.isArray(data.features) ||
-        data.features.length !== 8 ||
-        !data.features.every(
-          v => typeof v === 'number' &&
-               Number.isFinite(v) &&
-               v >= 0 && v <= 1
-        )
+        Array.isArray(data) ||
+        Object.keys(data).sort().join(',') !== 'features,id'
       ) {
         return json(res, 400, {
           error: 'invalid_abstract_trace'
         });
       }
 
-      recent.push(now);
-      offerRates.set(ip, recent);
-
       try {
-        const receipt = await mpe05.offer(
+        const result = await mpe05.offer(
           data.features, data.id
         );
 
         return json(res, 202, {
-          ...receipt,
+          ...result,
           message: 'Its moment is yet to come.'
         });
+
       } catch (error) {
+        if (error.code === 'RATE_LIMIT') {
+          return json(res, 429, {
+            error: 'memory_is_resting'
+          });
+        }
+
+        if (error.message === 'invalid_offer') {
+          return json(res, 400, {
+            error: 'invalid_abstract_trace'
+          });
+        }
+
         console.error(
-          'Offer failed:',
+          'MPE offer:',
           error.code || error.message
         );
 
@@ -398,6 +401,65 @@ const server = http.createServer(async (req, res) => {
         )
       )
     );
+  }
+
+
+  if (req.method === 'POST' &&
+      p === '/api/admin/backup') {
+    if (!sameOrigin(req) || !authorized(req)) {
+      return json(res, 403, {
+        error: 'access_denied'
+      });
+    }
+
+    try {
+      const state = await mpe05.read();
+
+      return json(res, 200, {
+        format: 'MPE-state-snapshot-v1',
+        exportedAt: new Date().toISOString(),
+        state
+      });
+
+    } catch (error) {
+      return json(res, 503, {
+        error: 'backup_unavailable'
+      });
+    }
+  }
+
+  if (req.method === 'POST' &&
+      p === '/api/admin/retry-test') {
+    if (!sameOrigin(req) || !authorized(req)) {
+      return json(res, 403, {
+        error: 'access_denied'
+      });
+    }
+
+    try {
+      const before = await mpe05.read();
+      const id = crypto.randomUUID();
+      const features = Array(8).fill(0.5);
+
+      const first = await mpe05.offer(features, id);
+      const second = await mpe05.offer(features, id);
+      const after = await mpe05.read();
+
+      return json(res, 200, {
+        passed:
+          after.offers - before.offers === 1 &&
+          second.duplicate === true,
+        beforeOffers: before.offers,
+        afterOffers: after.offers,
+        firstAccepted: first.accepted,
+        secondWasDuplicate: second.duplicate
+      });
+
+    } catch (error) {
+      return json(res, 503, {
+        error: 'retry_test_failed'
+      });
+    }
   }
 
   if (req.method === 'GET' && p === '/api/test/marker') {
@@ -524,3 +586,29 @@ const server = http.createServer(async (req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
   console.log('MPE engine integration test 0.5 on port ' + PORT);
 });
+
+
+// Automatic memory clock.
+// MySQL transaction locking prevents concurrent ticks
+// and offerings from overwriting each other.
+
+let clockRunning = false;
+
+async function memoryClock() {
+  if (clockRunning) return;
+  clockRunning = true;
+
+  try {
+    await mpe05.tick();
+  } catch (error) {
+    console.error(
+      'Memory clock:',
+      error.code || error.message
+    );
+  } finally {
+    clockRunning = false;
+  }
+}
+
+setTimeout(memoryClock, 15000).unref();
+setInterval(memoryClock, 60000).unref();
