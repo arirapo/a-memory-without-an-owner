@@ -75,6 +75,51 @@ async function oldMarker() {
   }
 }
 
+
+function studioAuthorized(req) {
+  if (ADMIN_KEY.length < 24) return false;
+
+  const header = req.headers.authorization || '';
+
+  if (!header.startsWith('Basic ')) return false;
+
+  try {
+    const decoded = Buffer.from(
+      header.slice(6),
+      'base64'
+    ).toString('utf8');
+
+    const colon = decoded.indexOf(':');
+
+    if (colon < 0) return false;
+
+    const username = decoded.slice(0, colon);
+    const password = decoded.slice(colon + 1);
+
+    if (username !== 'mpe') return false;
+
+    const a = Buffer.from(password);
+    const b = Buffer.from(ADMIN_KEY);
+
+    return a.length === b.length &&
+      crypto.timingSafeEqual(a, b);
+
+  } catch {
+    return false;
+  }
+}
+
+function studioChallenge(res) {
+  res.writeHead(401, {
+    'WWW-Authenticate':
+      'Basic realm="MPE Studio", charset="UTF-8"',
+    'Cache-Control': 'no-store',
+    'Content-Type': 'text/plain; charset=utf-8'
+  });
+
+  res.end('Administrator authentication required');
+}
+
 const page = `<!doctype html>
 <html lang="en">
 <head>
@@ -125,10 +170,10 @@ pre {
 <main>
 <small>TRACES BETWEEN / A MEMORY WITHOUT AN OWNER</small>
 <h1>The memory has a place to live.</h1>
-<p class="lead">Safe memory experiment 0.5</p>
+<p class="lead">MPE Studio — Private Administration</p>
 <section>
-<p>This private preview tests serialized memory updates.
-No participant contributions are accepted yet.</p>
+<p>Private memory diagnostics and research controls.
+These functions are not part of the public artwork.</p>
 
 <button class="secondary" id="read">Read memory</button>
 <button class="secondary" id="old">Check first MySQL marker</button>
@@ -175,7 +220,7 @@ async function call(url, method = 'GET') {
     const response = await fetch(url, {
       method,
       cache: 'no-store',
-      headers: method === 'POST'
+      headers: secret
         ? { 'X-MPE-Admin-Key': secret }
         : {}
     });
@@ -291,10 +336,43 @@ const server = http.createServer(async (req, res) => {
   ) {
     return json(res, 200, {
       status: 'ok',
-      version: '0.9.0',
+      version: '1.0.0-beta.1',
       startedAt,
       storage: store.mode
     });
+  }
+
+
+  // Private research studio.
+  if (req.method === 'GET' && p === '/studio') {
+    if (!studioAuthorized(req)) {
+      return studioChallenge(res);
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+      'Content-Security-Policy':
+        "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "object-src 'none'; base-uri 'none'; " +
+        "frame-ancestors 'none'"
+    });
+
+    return res.end(page);
+  }
+
+  // Public artwork is now the main page.
+  if (req.method === 'GET' && p === '/') {
+    p = '/living-memory.html';
+  }
+
+  // Separate participation experience.
+  if (req.method === 'GET' && p === '/offer') {
+    p = '/leave-a-trace.html';
   }
 
   if (req.method === 'GET' && p === '/') {
@@ -559,6 +637,12 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && p === '/api/test/marker') {
+    if (!authorized(req)) {
+      return json(res, 401, {
+        error: 'admin_key_required'
+      });
+    }
+
     try {
       const marker = await oldMarker();
 
@@ -624,6 +708,12 @@ const server = http.createServer(async (req, res) => {
   if (memoryPaths.has(p)) {
 
     if (p === '/api/memory/state' && req.method === 'GET') {
+      if (!authorized(req)) {
+        return json(res, 401, {
+          error: 'admin_key_required'
+        });
+      }
+
       try {
         const state = await store.read();
 
