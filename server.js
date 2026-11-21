@@ -1,25 +1,64 @@
 
 'use strict';
 
-// A Memory Without an Owner — Production Experiment 0.2
-// An isolated, admin-protected persistence test.
-// It does not write participant or MPE memory data.
+// A Memory Without an Owner
+// Production Experiment 0.3
+// Portable memory persistence infrastructure.
 
 const http = require('node:http');
 const crypto = require('node:crypto');
 const mysql = require('mysql2/promise');
+const store = require('./memory-store');
 
 const PORT = Number(process.env.PORT || 3000);
-const startedAt = new Date().toISOString();
 const ADMIN_KEY = process.env.MPE_ADMIN_KEY || '';
+const startedAt = new Date().toISOString();
 
-function configured() {
-  return ['DB_HOST', 'DB_USER', 'DB_PASSWORD', 'DB_NAME']
-    .every(name => Boolean(process.env[name]));
+function json(res, status, value) {
+  res.writeHead(status, {
+    'Content-Type':
+      'application/json; charset=utf-8',
+    'Cache-Control': 'no-store',
+    'X-Content-Type-Options': 'nosniff'
+  });
+
+  res.end(JSON.stringify(value));
 }
 
-async function connection() {
-  return mysql.createConnection({
+function authorized(req) {
+  const supplied = req.headers['x-mpe-admin-key'];
+
+  if (
+    ADMIN_KEY.length < 24 ||
+    typeof supplied !== 'string'
+  ) {
+    return false;
+  }
+
+  const a = Buffer.from(supplied);
+  const b = Buffer.from(ADMIN_KEY);
+
+  return a.length === b.length &&
+    crypto.timingSafeEqual(a, b);
+}
+
+function sameOrigin(req) {
+  if (!req.headers.origin) return true;
+
+  try {
+    return new URL(req.headers.origin).host ===
+      req.headers.host;
+  } catch {
+    return false;
+  }
+}
+
+// Preserve the first MySQL marker test.
+
+async function oldMarker() {
+  if (!process.env.DB_HOST) return null;
+
+  const db = await mysql.createConnection({
     host: process.env.DB_HOST,
     port: Number(process.env.DB_PORT || 3306),
     user: process.env.DB_USER,
@@ -27,238 +66,266 @@ async function connection() {
     database: process.env.DB_NAME,
     connectTimeout: 6000
   });
-}
 
-async function readMarker() {
-  const db = await connection();
   try {
     const [rows] = await db.execute(
-      'SELECT marker, created_at FROM mpe_deployment_test WHERE id = ?',
+      `SELECT marker, created_at
+       FROM mpe_deployment_test
+       WHERE id = ?`,
       ['first-memory']
     );
+
     return rows[0] || null;
-  } catch (error) {
-    if (error.code === 'ER_NO_SUCH_TABLE') return null;
-    throw error;
+
   } finally {
     await db.end();
-  }
-}
-
-async function createMarker() {
-  const db = await connection();
-  try {
-    await db.execute(`
-      CREATE TABLE IF NOT EXISTS mpe_deployment_test (
-        id VARCHAR(40) PRIMARY KEY,
-        marker VARCHAR(80) NOT NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
-      )
-    `);
-
-    await db.execute(
-      'INSERT IGNORE INTO mpe_deployment_test (id, marker) VALUES (?, ?)',
-      ['first-memory', crypto.randomUUID()]
-    );
-
-    const [rows] = await db.execute(
-      'SELECT marker, created_at FROM mpe_deployment_test WHERE id = ?',
-      ['first-memory']
-    );
-    return rows[0];
-  } finally {
-    await db.end();
-  }
-}
-
-function json(res, status, data) {
-  res.writeHead(status, {
-    'Content-Type': 'application/json; charset=utf-8',
-    'Cache-Control': 'no-store',
-    'X-Content-Type-Options': 'nosniff'
-  });
-  res.end(JSON.stringify(data));
-}
-
-function authorized(req) {
-  const candidate = req.headers['x-mpe-admin-key'];
-  if (ADMIN_KEY.length < 24 || typeof candidate !== 'string') return false;
-  const a = Buffer.from(candidate);
-  const b = Buffer.from(ADMIN_KEY);
-  return a.length === b.length && crypto.timingSafeEqual(a, b);
-}
-
-function sameOrigin(req) {
-  if (!req.headers.origin) return true;
-  try {
-    return new URL(req.headers.origin).host === req.headers.host;
-  } catch {
-    return false;
   }
 }
 
 const page = `<!doctype html>
-<html lang="en"><head>
+<html lang="en">
+<head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>A Memory Without an Owner — Persistence</title>
+<meta name="viewport"
+      content="width=device-width,initial-scale=1">
+
+<title>A Memory Without an Owner</title>
+
 <style>
-:root{color-scheme:dark}
-*{box-sizing:border-box}
-body{
-  background:#0b1119;
-  color:#eee8df;
-  font:15px/1.6 system-ui,sans-serif;
-  margin:0;
-  min-height:100vh;
-  display:grid;
-  place-items:center
+:root {
+  color-scheme: dark;
 }
-main{width:min(90vw,760px);padding:36px 0}
-small{color:#9db8bf;letter-spacing:.13em}
-h1{font:normal clamp(38px,6vw,70px)/1.07 Georgia,serif}
-.lead{font:italic 20px Georgia,serif;color:#e6be94}
-section{
-  border:1px solid #344754;
-  border-radius:13px;
-  background:#17222e;
-  padding:20px;
-  margin-top:34px
+
+* {
+  box-sizing: border-box;
 }
-label{display:block;color:#aebdc5;font-size:13px}
-input{
-  background:#0c1924;
-  border:1px solid #506b77;
-  border-radius:7px;
-  color:#eee8df;
-  padding:12px;
-  width:100%;
-  margin:8px 0
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  background: #0b1119;
+  color: #eee8df;
+  font: 15px/1.6 system-ui,sans-serif;
 }
-button{
-  background:#e6be94;
-  border:0;
-  border-radius:8px;
-  color:#182730;
-  font-weight:bold;
-  padding:12px 16px;
-  cursor:pointer;
-  margin:7px 7px 7px 0
+
+main {
+  width: min(90vw,800px);
+  padding: 35px 0;
 }
-button.secondary{
-  background:#293d48;
-  color:#eee8df;
-  border:1px solid #506b77
+
+small {
+  color: #9db8bf;
+  letter-spacing: .13em;
 }
-pre{
-  white-space:pre-wrap;
-  overflow-wrap:anywhere;
-  color:#c9d4d8
+
+h1 {
+  font: normal clamp(37px,6vw,70px)/1.08
+        Georgia,serif;
 }
-</style></head><body><main>
-<small>TRACES BETWEEN / A MEMORY WITHOUT AN OWNER</small>
+
+.lead {
+  font: italic 20px Georgia,serif;
+  color: #e6be94;
+}
+
+section {
+  border: 1px solid #344754;
+  background: #17222e;
+  padding: 22px;
+  border-radius: 13px;
+  margin-top: 28px;
+}
+
+button {
+  background: #e6be94;
+  color: #182730;
+  border: 0;
+  border-radius: 8px;
+  padding: 11px 14px;
+  font-weight: 700;
+  cursor: pointer;
+  margin: 6px 5px 6px 0;
+}
+
+button.secondary {
+  background: #293d48;
+  color: #eee8df;
+  border: 1px solid #506b77;
+}
+
+input {
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #506b77;
+  background: #0c1924;
+  color: #eee8df;
+}
+
+label {
+  color: #aebdc5;
+  font-size: 13px;
+}
+
+pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: #c7d7d9;
+}
+</style>
+</head>
+
+<body>
+<main>
+
+<small>
+TRACES BETWEEN / A MEMORY WITHOUT AN OWNER
+</small>
+
 <h1>The memory has a place to live.</h1>
-<p class="lead">Persistence experiment 0.2</p>
+
+<p class="lead">Portable memory experiment 0.3</p>
+
 <section>
-<p>This private preview tests one database marker.
-No participant memories are stored yet.</p>
-<button class="secondary" id="read">Read stored marker</button>
-<label for="key">Admin key (used only for this request; not saved)</label>
-<input id="key" type="password" autocomplete="off" spellcheck="false">
-<button id="write">Create marker once</button>
-<pre id="result">Ready for the first experiment.</pre>
-</section></main>
+  <p>
+    This experiment creates a separate,
+    persistent memory snapshot.
+    No participant contributions are accepted yet.
+  </p>
+
+  <button class="secondary" id="read">
+    Read memory
+  </button>
+
+  <button class="secondary" id="old">
+    Check first MySQL marker
+  </button>
+
+  <label for="key">
+    Admin key — used only for this request
+  </label>
+
+  <input
+    id="key"
+    type="password"
+    autocomplete="off"
+    spellcheck="false">
+
+  <button id="seed">
+    Initialize test memory
+  </button>
+
+  <button id="pulse">
+    Add one test pulse
+  </button>
+
+  <pre id="result">Ready.</pre>
+</section>
+</main>
+
 <script>
-const output=document.getElementById('result');
+const result = document.getElementById('result');
 
-async function call(url,opts={}){
-  output.textContent='Contacting the memory…';
-  try{
-    const response=await fetch(url,{cache:'no-store',...opts});
-    const payload=await response.json();
-    output.textContent=JSON.stringify(payload,null,2);
-  }catch(e){
-    output.textContent='Connection error: '+e.message;
-  }
-}
+async function call(url, method='GET') {
+  const key = document.getElementById('key');
+  const secret = key.value;
 
-document.getElementById('read').onclick=()=>
-  call('/api/test/marker');
+  if (method === 'POST') key.value = '';
 
-document.getElementById('write').onclick=()=>{
-  const key=document.getElementById('key');
-  const value=key.value;
-  key.value='';
-
-  call('/api/test/marker',{
-    method:'POST',
-    headers:{'X-MPE-Admin-Key':value}
-  });
-};
-</script></body></html>`;
-
-const server = http.createServer(async (req, res) => {
-  let pathname;
+  result.textContent = 'Contacting the server…';
 
   try {
-    pathname = new URL(req.url, 'http://localhost').pathname;
-  } catch {
-    return json(res, 400, { error: 'invalid_path' });
+    const response = await fetch(url, {
+      method,
+      cache: 'no-store',
+      headers: method === 'POST'
+        ? { 'X-MPE-Admin-Key': secret }
+        : {}
+    });
+
+    const data = await response.json();
+
+    result.textContent =
+      JSON.stringify(data,null,2);
+
+  } catch (error) {
+    result.textContent =
+      'Connection error: ' + error.message;
   }
+}
+
+document.getElementById('read').onclick =
+  () => call('/api/memory/state');
+
+document.getElementById('old').onclick =
+  () => call('/api/test/marker');
+
+document.getElementById('seed').onclick =
+  () => call('/api/memory/initialize','POST');
+
+document.getElementById('pulse').onclick =
+  () => call('/api/memory/test-pulse','POST');
+</script>
+
+</body>
+</html>`;
+
+const server = http.createServer(async (req, res) => {
+  let p;
+
+  try {
+    p = new URL(
+      req.url,
+      'http://localhost'
+    ).pathname;
+  } catch {
+    return json(res, 400, {
+      error: 'bad_path'
+    });
+  }
+
+  // Health endpoint.
 
   if (
     req.method === 'GET' &&
-    (pathname === '/health' || pathname === '/api/health')
+    (p === '/health' || p === '/api/health')
   ) {
     return json(res, 200, {
       status: 'ok',
-      version: '0.2.0',
-      startedAt
+      version: '0.3.0',
+      startedAt,
+      storage: store.mode
     });
   }
 
-  if (req.method === 'GET' && pathname === '/') {
+  // Experimental interface.
+
+  if (req.method === 'GET' && p === '/') {
     res.writeHead(200, {
       'Content-Type': 'text/html; charset=utf-8',
-      'Cache-Control': 'no-store'
+      'Cache-Control': 'no-store',
+      'Content-Security-Policy':
+        "default-src 'self'; " +
+        "script-src 'unsafe-inline'; " +
+        "style-src 'unsafe-inline'; " +
+        "object-src 'none'; base-uri 'none'"
     });
+
     return res.end(page);
   }
 
-  if (pathname === '/api/test/marker') {
-    if (!configured()) {
-      return json(res, 503, {
-        error: 'database_not_configured'
-      });
-    }
+  // Previous MySQL experiment.
 
-    if (req.method !== 'GET' && req.method !== 'POST') {
-      return json(res, 405, {
-        error: 'method_not_allowed'
-      });
-    }
-
-    if (req.method === 'POST') {
-      if (!sameOrigin(req)) {
-        return json(res, 403, {
-          error: 'origin_rejected'
-        });
-      }
-
-      if (!authorized(req)) {
-        return json(res, 401, {
-          error: 'admin_key_required'
-        });
-      }
-    }
-
+  if (
+    req.method === 'GET' &&
+    p === '/api/test/marker'
+  ) {
     try {
-      const marker = req.method === 'POST'
-        ? await createMarker()
-        : await readMarker();
+      const marker = await oldMarker();
 
       return json(res, 200, {
-        database: 'connected',
         stored: !!marker,
         marker: marker?.marker || null,
         createdAt: marker?.created_at || null
@@ -266,21 +333,103 @@ const server = http.createServer(async (req, res) => {
 
     } catch (error) {
       console.error(
-        'Persistence test failed:',
+        'Marker lookup:',
         error.code || error.message
       );
 
       return json(res, 503, {
-        error: 'database_operation_failed'
+        error: 'marker_unavailable'
       });
     }
   }
 
-  return json(res, 404, { error: 'not_found' });
+  // New memory storage API.
+
+  const memoryPaths = [
+    '/api/memory/state',
+    '/api/memory/initialize',
+    '/api/memory/test-pulse'
+  ];
+
+  if (memoryPaths.includes(p)) {
+
+    if (
+      req.method === 'GET' &&
+      p === '/api/memory/state'
+    ) {
+      try {
+        const state = await store.read();
+
+        return json(res, 200, {
+          initialized: !!state,
+          storage: store.mode,
+          state
+        });
+
+      } catch (error) {
+        console.error(
+          'Memory read:',
+          error.code || error.message
+        );
+
+        return json(res, 503, {
+          error: 'memory_unavailable'
+        });
+      }
+    }
+
+    if (
+      req.method !== 'POST' ||
+      p === '/api/memory/state'
+    ) {
+      return json(res, 405, {
+        error: 'method_not_allowed'
+      });
+    }
+
+    if (!sameOrigin(req)) {
+      return json(res, 403, {
+        error: 'origin_rejected'
+      });
+    }
+
+    if (!authorized(req)) {
+      return json(res, 401, {
+        error: 'admin_key_required'
+      });
+    }
+
+    try {
+      const state =
+        p === '/api/memory/initialize'
+          ? await store.initialize()
+          : await store.testPulse();
+
+      return json(res, 200, {
+        initialized: true,
+        storage: store.mode,
+        state
+      });
+
+    } catch (error) {
+      console.error(
+        'Memory write:',
+        error.code || error.message
+      );
+
+      return json(res, 503, {
+        error: 'memory_write_failed'
+      });
+    }
+  }
+
+  return json(res, 404, {
+    error: 'not_found'
+  });
 });
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(
-    `Persistence experiment 0.2 listening on port ${PORT}`
+    'MPE portability test 0.3 on port ' + PORT
   );
 });
