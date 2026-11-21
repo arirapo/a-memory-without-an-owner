@@ -1,9 +1,9 @@
 
 {
   "name": "a-memory-without-an-owner",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Portable Node.js deployment test for A Memory Without an Owner",
+  "description": "Portable Node.js and MySQL persistence test",
   "main": "server.js",
   "type": "commonjs",
   "engines": {
@@ -14,5 +14,7 @@
     "start": "node server.js",
     "check": "node --check server.js"
   },
-  "dependencies": {}
+  "dependencies": {
+    "mysql2": "^3.15.3"
+  }
 }
