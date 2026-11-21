@@ -247,6 +247,40 @@ const server = http.createServer(async (req, res) => {
     return res.end(page);
   }
 
+  // Optional curated ghost photographs: read-only, exact filenames.
+  if (req.method === 'GET' && (p === '/ghost/R0012371.jpeg' || p === '/ghost/R0011165.jpeg')) {
+    const fs = require('node:fs');
+    const file = require('node:path').join(__dirname, 'ghost', p.slice('/ghost/'.length));
+    try {
+      const bytes = fs.readFileSync(file);
+      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=3600' });
+      return res.end(bytes);
+    } catch { return json(res, 404, { error: 'ghost_unavailable' }); }
+  }
+
+  // Read-only public visual snapshot. No mutation or simulation.
+  if (req.method === 'GET' && p === '/api/artwork/state') {
+    try {
+      const memory = await mpe05.read();
+      if (!memory) return json(res, 503, { error: 'artwork_not_initialized' });
+      return json(res, 200, mpe05.artworkState(memory));
+    } catch (error) {
+      console.error('Artwork snapshot:', error.code || error.message);
+      return json(res, 503, { error: 'artwork_unavailable' });
+    }
+  }
+
+  if (req.method === 'GET' && p === '/living-memory.html') {
+    const fs = require('node:fs');
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'"
+    });
+    return res.end(fs.readFileSync(require('node:path').join(__dirname,'living-memory.html')));
+  }
+
   if (req.method === 'GET' && p === '/api/test/marker') {
     try {
       const marker = await oldMarker();

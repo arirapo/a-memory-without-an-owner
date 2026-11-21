@@ -302,9 +302,21 @@ function summary(s) {
   };
 }
 
+// Presentation-only shape: never exposes stored raw input or administrative controls.
+function artworkState(memory) {
+  const d = createEngine(check(memory)).diagnostic();
+  return {
+    revision: memory.revision, days: d.days, offers: d.offers,
+    forgotten: d.forgotten, regenerations: d.regenerations,
+    echoes: d.echoes, weather: d.weather, nodes: d.nodes,
+    field: d.field, deepField: d.deepField, deepStats: d.deepStats
+  };
+}
+
 module.exports = {
   read,
   initialize,
   change,
-  summary
+  summary,
+  artworkState
 };
