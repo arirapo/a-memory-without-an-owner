@@ -9,6 +9,7 @@ const http = require('node:http');
 const crypto = require('node:crypto');
 const mysql = require('mysql2/promise');
 const store = require('./memory-store');
+const mpe05 = require('./mpe05');
 
 const PORT = Number(process.env.PORT || 3000);
 const ADMIN_KEY = process.env.MPE_ADMIN_KEY || '';
@@ -123,7 +124,7 @@ pre {
 <main>
 <small>TRACES BETWEEN / A MEMORY WITHOUT AN OWNER</small>
 <h1>The memory has a place to live.</h1>
-<p class="lead">Safe memory experiment 0.4</p>
+<p class="lead">Safe memory experiment 0.5</p>
 <section>
 <p>This private preview tests serialized memory updates.
 No participant contributions are accepted yet.</p>
@@ -137,6 +138,13 @@ No participant contributions are accepted yet.</p>
 <button id="seed">Initialize test memory</button>
 <button id="pulse">Add one test pulse</button>
 <button id="concurrent">Test 20 simultaneous updates</button>
+
+<p><strong>MPE 0.5 — isolated memory engine</strong></p>
+
+<button id="mpeInit">Initialize MPE 0.5</button>
+<button id="mpeView" class="secondary">Inspect MPE 0.5</button>
+<button id="mpeSim">Simulate 10 traces</button>
+<button id="mpeAge">Advance 30 days</button>
 
 <pre id="result">Ready.</pre>
 </section>
@@ -186,6 +194,16 @@ document.getElementById('pulse').onclick =
 
 document.getElementById('concurrent').onclick =
   () => call('/api/memory/concurrency-test', 'POST');
+
+for (const [id, endpoint] of [
+  ['mpeInit', 'init'],
+  ['mpeView', 'view'],
+  ['mpeSim', 'simulate'],
+  ['mpeAge', 'age']
+]) {
+  document.getElementById(id).onclick =
+    () => call('/api/mpe05/' + endpoint, 'POST');
+}
 </script>
 </body>
 </html>`;
@@ -212,7 +230,7 @@ const server = http.createServer(async (req, res) => {
   ) {
     return json(res, 200, {
       status: 'ok',
-      version: '0.4.0',
+      version: '0.5.0',
       startedAt,
       storage: store.mode
     });
@@ -241,6 +259,54 @@ const server = http.createServer(async (req, res) => {
     } catch (error) {
       console.error('Marker lookup:', error.code || error.message);
       return json(res, 503, { error: 'marker_unavailable' });
+    }
+  }
+
+  if (p.startsWith('/api/mpe05/')) {
+    if (req.method !== 'POST') {
+      return json(res, 405, {
+        error: 'method_not_allowed'
+      });
+    }
+
+    if (!sameOrigin(req)) {
+      return json(res, 403, {
+        error: 'origin_rejected'
+      });
+    }
+
+    if (!authorized(req)) {
+      return json(res, 401, {
+        error: 'admin_key_required'
+      });
+    }
+
+    try {
+      const action = p.slice('/api/mpe05/'.length);
+      let state;
+
+      if (action === 'init') {
+        state = await mpe05.initialize();
+      } else if (action === 'view') {
+        state = await mpe05.read();
+      } else if (action === 'simulate') {
+        state = await mpe05.change('simulate', 10);
+      } else if (action === 'age') {
+        state = await mpe05.change('age', 30);
+      } else {
+        return json(res, 404, {
+          error: 'unknown_mpe_action'
+        });
+      }
+
+      return json(res, 200, mpe05.summary(state));
+
+    } catch (e) {
+      console.error('MPE 0.5:', e.code || e.message);
+
+      return json(res, 503, {
+        error: 'mpe05_operation_failed'
+      });
     }
   }
 
@@ -303,5 +369,5 @@ const server = http.createServer(async (req, res) => {
 });
 
 server.listen(PORT, '0.0.0.0', () => {
-  console.log('MPE safe memory test 0.4 on port ' + PORT);
+  console.log('MPE engine integration test 0.5 on port ' + PORT);
 });
