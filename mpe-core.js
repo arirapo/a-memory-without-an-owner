@@ -551,8 +551,15 @@ function age(days) {
   memory.last = now();
 }
 
+function offer(features) {
+  if (!submit(features)) {
+    throw Error('invalid_features');
+  }
+}
+
 return {
   currentState,
+  offer,
   simulate,
   age,
   diagnostic

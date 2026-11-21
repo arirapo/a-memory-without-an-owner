@@ -1,0 +1,242 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Leave a Trace — A Memory Without an Owner</title>
+<style>
+:root{color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;min-height:100vh;background:#0b1119;color:#ebe7e1;font:15px/1.55 system-ui,sans-serif}
+main{max-width:1050px;margin:0 auto;padding:24px 18px}
+.eyebrow{font:11px monospace;letter-spacing:.16em;color:#a5bcc1}
+h1{font:normal clamp(38px,6vw,70px)/1.08 Georgia,serif;margin:26px 0 8px}
+p.lead{font:italic clamp(17px,2vw,22px) Georgia,serif;color:#e3b991;margin:0 0 32px}
+.layout{display:grid;grid-template-columns:1fr 320px;gap:16px}
+.panel{background:#17232e;border:1px solid #354a57;border-radius:14px;padding:20px}
+textarea{display:block;width:100%;height:165px;resize:vertical;background:#0b1b26;color:#f3ede4;border:1px solid #567480;border-radius:9px;padding:15px;font:16px/1.5 system-ui;margin:16px 0}
+button{padding:11px 15px;background:#e6bb92;color:#152732;border:0;border-radius:9px;font:600 14px system-ui;cursor:pointer;margin:5px 7px 5px 0}
+button.secondary{background:#2a414e;border:1px solid #52707c;color:#e7e8e5}
+button:disabled{opacity:.5}
+.receipt{margin-top:16px;border:1px solid #4c6b78;border-radius:12px;padding:14px}
+.receipt svg{display:block;width:min(100%,260px);margin:auto}
+.receipt p{text-align:center;font:italic 16px Georgia,serif}
+a{color:#aeced1;text-decoration:none}
+#status{min-height:28px;color:#e1b78e;font-size:13px}
+.side{font-size:13px;color:#b3c2c7}
+.side h2{font:normal 26px Georgia,serif;color:#eee8df}
+footer{margin-top:30px;font-size:12px;color:#8ca4ac}
+@media(max-width:760px){.layout{grid-template-columns:1fr}main{padding:16px 10px}}
+</style>
+</head>
+<body>
+<main>
+<div class="eyebrow">TRACES BETWEEN / A MEMORY WITHOUT AN OWNER</div>
+<h1>Leave a trace.</h1>
+<p class="lead">A word, a thought, or a silence.</p>
+
+<div class="layout">
+<section class="panel">
+<p>Your words are transformed here, in this browser. Only eight abstract, partly randomized values travel to the memory. Your original text is not transmitted or stored.</p>
+
+<textarea id="entry" maxlength="500" aria-label="A word or thought" placeholder="What would you leave behind?"></textarea>
+
+<div>
+<button id="textOffer">Transform &amp; offer</button>
+<button class="secondary" id="silenceOffer">Offer silence ∅</button>
+</div>
+
+<p id="status" role="status" aria-live="polite">The memory is listening.</p>
+<div id="receipt" class="receipt" hidden></div>
+</section>
+
+<aside class="panel side">
+<h2>A shared memory</h2>
+<p>Your trace may remain invisible for a while. The memory changes, absorbs, forgets and forms new echoes.</p>
+<p>You receive one momentary keepsake. The original words do not become part of a public archive.</p>
+<p><a href="/living-memory.html">View the living memory</a></p>
+</aside>
+</div>
+
+<footer>MPE 0.7 · PRIVATE PREVIEW · Experimental participation</footer>
+</main>
+
+<script>
+(()=>{
+'use strict';
+
+const $=id=>document.getElementById(id);
+let busy=false,retry=null;
+const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
+
+function features(text,silent){
+  let len=0,spaces=0,marks=0,diff=0,previous=0;
+
+  for(const ch of text){
+    const n=ch.codePointAt(0);
+    len++;
+    if(/\s/u.test(ch))spaces++;
+    if(/[.,!?;:]/u.test(ch))marks++;
+    diff+=Math.min(1,Math.abs(n-previous)/100);
+    previous=n;
+  }
+
+  const values=silent
+    ?[0.02,.02,.02,.02,.1,.08,.05,1]
+    :[
+      clamp(len/110),
+      clamp(spaces/Math.max(1,len)*5),
+      clamp(marks/Math.max(1,len)*9),
+      clamp(diff/Math.max(1,len)),
+      Math.random(),Math.random(),
+      Math.random(),Math.random()
+    ];
+
+  return values.map(v=>
+    clamp(Math.round((v*.35+Math.random()*.65)*20)/20)
+  );
+}
+
+function receipt(data){
+  const box=$('receipt');
+  box.replaceChildren();
+
+  const NS='http://www.w3.org/2000/svg';
+  const svg=document.createElementNS(NS,'svg');
+  svg.setAttribute('viewBox','0 0 270 345');
+
+  const hue=parseInt(data.id.slice(0,2),16)*360/255;
+
+  const rect=document.createElementNS(NS,'rect');
+  rect.setAttribute('width','270');
+  rect.setAttribute('height','345');
+  rect.setAttribute('fill','hsl('+hue+',26%,16%)');
+  svg.append(rect);
+
+  for(let i=0;i<21;i++){
+    const a=i*2.399,r=7+i*4;
+    const x=135+Math.cos(a)*r;
+    const y=143+Math.sin(a)*r;
+    const el=document.createElementNS(NS,'ellipse');
+
+    el.setAttribute('cx',x);
+    el.setAttribute('cy',y);
+    el.setAttribute('rx',11+i%5*5);
+    el.setAttribute('ry',10+i%4*6);
+    el.setAttribute('fill','none');
+    el.setAttribute('stroke','hsl('+((hue+i*17)%360)+',55%,74%)');
+    el.setAttribute('stroke-opacity','.58');
+    el.setAttribute('transform','rotate('+(i*19)+' '+x+' '+y+')');
+    svg.append(el);
+  }
+
+  for(const [text,y,size] of [
+    ['You were here.',276,22],
+    [new Date(data.at).toISOString(),305,10]
+  ]){
+    const e=document.createElementNS(NS,'text');
+    e.setAttribute('x','135');
+    e.setAttribute('y',y);
+    e.setAttribute('text-anchor','middle');
+    e.setAttribute('font-family',size===22?'Georgia':'monospace');
+    e.setAttribute('font-size',size);
+    e.setAttribute('fill','#efe6db');
+    e.textContent=text;
+    svg.append(e);
+  }
+
+  box.append(svg);
+
+  const p=document.createElement('p');
+  p.textContent='Your trace was accepted. Its moment is yet to come.';
+  box.append(p);
+
+  const save=document.createElement('button');
+  save.textContent='Save SVG';
+
+  save.onclick=()=>{
+    const xml=new XMLSerializer().serializeToString(svg);
+    const url=URL.createObjectURL(
+      new Blob([xml],{type:'image/svg+xml'})
+    );
+    const a=document.createElement('a');
+    a.href=url;
+    a.download='You-were-here.svg';
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(url),1500);
+  };
+
+  const letGo=document.createElement('button');
+  letGo.textContent='Let it go';
+  letGo.className='secondary';
+  letGo.onclick=()=>{
+    box.replaceChildren();
+    box.hidden=true;
+  };
+
+  box.append(save,letGo);
+  box.hidden=false;
+}
+
+async function offer(silent){
+  if(busy)return;
+
+  const original=$('entry').value;
+
+  if(!silent&&!original.trim()){
+    $('status').textContent='Write a word, or choose silence.';
+    return;
+  }
+
+  const fingerprint=silent?'∅':original;
+  const body=retry&&retry.fingerprint===fingerprint
+    ?retry.body
+    :{
+      id:crypto.randomUUID(),
+      features:features(silent?'':original,silent)
+    };
+
+  retry={fingerprint,body};
+  busy=true;
+
+  $('textOffer').disabled=true;
+  $('silenceOffer').disabled=true;
+  $('status').textContent='Offering your trace…';
+
+  try{
+    const response=await fetch('/api/offer',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(body)
+    });
+
+    const data=await response.json();
+
+    if(!response.ok){
+      throw Error(data.error||('HTTP '+response.status));
+    }
+
+    $('entry').value='';
+    receipt(data);
+    $('status').textContent=
+      'Accepted · the memory will decide when it appears.';
+    retry=null;
+
+  }catch(e){
+    $('status').textContent=
+      'Submission uncertain: '+e.message+
+      '. The original text remains here; retrying will reuse the same trace ID.';
+  }finally{
+    busy=false;
+    $('textOffer').disabled=false;
+    $('silenceOffer').disabled=false;
+  }
+}
+
+$('textOffer').onclick=()=>offer(false);
+$('silenceOffer').onclick=()=>offer(true);
+
+})();
+</script>
+</body>
+</html>

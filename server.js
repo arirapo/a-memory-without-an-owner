@@ -208,6 +208,8 @@ for (const [id, endpoint] of [
 </body>
 </html>`;
 
+const offerRates = new Map();
+
 const memoryPaths = new Set([
   '/api/memory/state',
   '/api/memory/initialize',
@@ -230,7 +232,7 @@ const server = http.createServer(async (req, res) => {
   ) {
     return json(res, 200, {
       status: 'ok',
-      version: '0.5.0',
+      version: '0.7.0',
       startedAt,
       storage: store.mode
     });
@@ -279,6 +281,123 @@ const server = http.createServer(async (req, res) => {
       'Content-Security-Policy': "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'none'"
     });
     return res.end(fs.readFileSync(require('node:path').join(__dirname,'living-memory.html')));
+  }
+
+
+  if (req.method === 'POST' && p === '/api/offer') {
+    if (!sameOrigin(req)) {
+      return json(res, 403, { error: 'origin_rejected' });
+    }
+
+    const ip = req.socket.remoteAddress || 'unknown';
+    const now = Date.now();
+
+    const recent = (offerRates.get(ip) || [])
+      .filter(t => now - t < 60000);
+
+    if (recent.length >= 8) {
+      return json(res, 429, { error: 'too_many_offers' });
+    }
+
+    let body = '';
+    let tooLarge = false;
+
+    req.on('data', chunk => {
+      body += chunk;
+      if (body.length > 1024) tooLarge = true;
+    });
+
+    req.on('end', async () => {
+      if (tooLarge) {
+        return json(res, 413, {
+          error: 'request_too_large'
+        });
+      }
+
+      let data;
+
+      try {
+        data = JSON.parse(body);
+      } catch {
+        return json(res, 400, {
+          error: 'invalid_json'
+        });
+      }
+
+      if (
+        !data ||
+        typeof data !== 'object' ||
+        'text' in data ||
+        'original' in data ||
+        'raw' in data ||
+        !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+          .test(data.id || '') ||
+        !Array.isArray(data.features) ||
+        data.features.length !== 8 ||
+        !data.features.every(
+          v => typeof v === 'number' &&
+               Number.isFinite(v) &&
+               v >= 0 && v <= 1
+        )
+      ) {
+        return json(res, 400, {
+          error: 'invalid_abstract_trace'
+        });
+      }
+
+      recent.push(now);
+      offerRates.set(ip, recent);
+
+      try {
+        const receipt = await mpe05.offer(
+          data.features, data.id
+        );
+
+        return json(res, 202, {
+          ...receipt,
+          message: 'Its moment is yet to come.'
+        });
+      } catch (error) {
+        console.error(
+          'Offer failed:',
+          error.code || error.message
+        );
+
+        return json(res, 503, {
+          error: 'offer_unavailable'
+        });
+      }
+    });
+
+    return;
+  }
+
+  if (
+    req.method === 'GET' &&
+    p === '/leave-a-trace.html'
+  ) {
+    const fs = require('node:fs');
+
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Content-Security-Policy':
+        "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "connect-src 'self'; " +
+        "img-src 'self' blob: data:; " +
+        "object-src 'none'; base-uri 'none'"
+    });
+
+    return res.end(
+      fs.readFileSync(
+        require('node:path').join(
+          __dirname, 'leave-a-trace.html'
+        )
+      )
+    );
   }
 
   if (req.method === 'GET' && p === '/api/test/marker') {

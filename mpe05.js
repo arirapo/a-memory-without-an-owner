@@ -207,7 +207,12 @@ async function initialize() {
 function apply(s, action, value) {
   const e = createEngine(check(s));
 
-  if (action === 'simulate') {
+  if (action === 'offer') {
+    if (s.acceptedRequests?.some(r => r.id === value.id)) {
+      return s;
+    }
+    e.offer(value.features);
+  } else if (action === 'simulate') {
     e.simulate(value);
   } else if (action === 'age') {
     e.age(value);
@@ -217,6 +222,13 @@ function apply(s, action, value) {
 
   const next = e.currentState();
   next.revision = s.revision + 1;
+
+  if (action === 'offer') {
+    next.acceptedRequests = [
+      ...(s.acceptedRequests || []).slice(-511),
+      { id: value.id, at: new Date().toISOString() }
+    ];
+  }
 
   return check(next);
 }
@@ -313,10 +325,27 @@ function artworkState(memory) {
   };
 }
 
+async function offer(features, id) {
+  const state = await change('offer', { features, id });
+
+  const receipt = state.acceptedRequests?.find(
+    r => r.id === id
+  );
+
+  if (!receipt) throw Error('receipt_not_found');
+
+  return {
+    accepted: true,
+    id: receipt.id,
+    at: receipt.at
+  };
+}
+
 module.exports = {
   read,
   initialize,
   change,
   summary,
-  artworkState
+  artworkState,
+  offer
 };
