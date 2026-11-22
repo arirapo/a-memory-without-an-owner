@@ -1,4 +1,4 @@
-/* MPE Receipt Lab 0.1 — browser-only keepsake. No original material is stored. */
+/* MPE Receipt 1.3 — browser-only keepsake. No original material is stored. */
 (function(root){'use strict';
 const NS='http://www.w3.org/2000/svg';
 let lexiconPromise;
@@ -22,6 +22,11 @@ function drawQr(svg,text,x,y,size){const qr=root.MPEQRCode(text),n=qr.getModuleC
 function receiptSVG({id,at,poem}){if(typeof root.MPEQRCode!=='function')throw Error('QR encoder not loaded');const r=rng(seedNumber(id+'|picture'));const hue=Math.round(r()*360);const svg=el('svg',{xmlns:NS,viewBox:'0 0 360 550',width:'360',height:'550',role:'img','aria-label':'Unique I was here keepsake with a hidden QR poem'});
  const defs=el('defs',{},svg),grad=el('linearGradient',{id:'memoryGradient',x1:'0',x2:'1',y1:'0',y2:'1'},defs);el('stop',{offset:'0%','stop-color':`hsl(${hue},30%,18%)`},grad);el('stop',{offset:'100%','stop-color':`hsl(${(hue+55)%360},30%,9%)`},grad);
  el('rect',{width:360,height:550,fill:'url(#memoryGradient)'},svg);el('rect',{x:13,y:13,width:334,height:524,rx:7,fill:'none',stroke:'#d9c09d','stroke-opacity':'.35'},svg);
+ // An archival signature, quiet enough not to compete with the artwork.
+ // This text is part of the SVG itself, so it survives offline and in saved copies.
+ const imprint=el('text',{x:27,y:275,transform:'rotate(-90 27 275)','text-anchor':'middle',fill:'#e6ceb0','fill-opacity':'.53','font-family':'monospace','font-size':8,'letter-spacing':1.8},svg);
+ imprint.textContent='A MEMORY WITHOUT AN OWNER';
+
  for(let i=0;i<32;i++){const a=i*2.399963,radius=8+i*4.2,cx=180+Math.cos(a)*radius,cy=174+Math.sin(a)*radius;el('ellipse',{cx,cy,rx:8+(i%6)*4+r()*5,ry:8+(i%5)*5+r()*4,transform:`rotate(${Math.floor(r()*180)} ${cx} ${cy})`,fill:'none',stroke:`hsl(${(hue+i*11)%360},${38+Math.round(r()*35)}%,${59+Math.round(r()*24)}%)`,'stroke-width':.9+r()*.6,'stroke-opacity':(.15+r()*.56).toFixed(3)},svg);}
  const title=el('text',{x:180,y:311,'text-anchor':'middle',fill:'#f2e9dd','font-family':'Georgia,serif','font-size':25},svg);title.textContent='I was here.';
  const date=el('text',{x:180,y:334,'text-anchor':'middle',fill:'#bcb7b5','font-family':'monospace','font-size':10},svg);date.textContent=new Date(at).toISOString();
