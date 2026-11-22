@@ -509,7 +509,7 @@ const server = http.createServer(async (req, res) => {
   // Its inputs are processed only in the browser; the existing /api/offer
   // accepts only eight numerical features and a UUID.
   if (req.method === 'GET' && p === '/experiment') {
-    if (!studioAuthorized(req)) return studioChallenge(res);
+    
 
     const fs = require('node:fs');
     const path = require('node:path');
