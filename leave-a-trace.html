@@ -61,6 +61,8 @@ footer{margin-top:30px;font-size:12px;color:#8ca4ac}
 <footer>A MEMORY WITHOUT AN OWNER · Experimental participation</footer>
 </main>
 
+<script src="/mpe-qr.js"></script>
+<script src="/receipt-kit.js"></script>
 <script>
 (()=>{
 'use strict';
@@ -97,85 +99,31 @@ function features(text,silent){
   );
 }
 
-function receipt(data){
+async function receipt(data){
   const box=$('receipt');
   box.replaceChildren();
-
-  const NS='http://www.w3.org/2000/svg';
-  const svg=document.createElementNS(NS,'svg');
-  svg.setAttribute('viewBox','0 0 270 345');
-
-  const hue=parseInt(data.id.slice(0,2),16)*360/255;
-
-  const rect=document.createElementNS(NS,'rect');
-  rect.setAttribute('width','270');
-  rect.setAttribute('height','345');
-  rect.setAttribute('fill','hsl('+hue+',26%,16%)');
-  svg.append(rect);
-
-  for(let i=0;i<21;i++){
-    const a=i*2.399,r=7+i*4;
-    const x=135+Math.cos(a)*r;
-    const y=143+Math.sin(a)*r;
-    const el=document.createElementNS(NS,'ellipse');
-
-    el.setAttribute('cx',x);
-    el.setAttribute('cy',y);
-    el.setAttribute('rx',11+i%5*5);
-    el.setAttribute('ry',10+i%4*6);
-    el.setAttribute('fill','none');
-    el.setAttribute('stroke','hsl('+((hue+i*17)%360)+',55%,74%)');
-    el.setAttribute('stroke-opacity','.58');
-    el.setAttribute('transform','rotate('+(i*19)+' '+x+' '+y+')');
-    svg.append(el);
-  }
-
-  for(const [text,y,size] of [
-    ['You were here.',276,22],
-    [new Date(data.at).toISOString(),305,10]
-  ]){
-    const e=document.createElementNS(NS,'text');
-    e.setAttribute('x','135');
-    e.setAttribute('y',y);
-    e.setAttribute('text-anchor','middle');
-    e.setAttribute('font-family',size===22?'Georgia':'monospace');
-    e.setAttribute('font-size',size);
-    e.setAttribute('fill','#efe6db');
-    e.textContent=text;
-    svg.append(e);
-  }
-
-  box.append(svg);
-
-  const p=document.createElement('p');
-  p.textContent='Your trace was accepted. Its moment is yet to come.';
-  box.append(p);
-
-  const save=document.createElement('button');
-  save.textContent='Save SVG';
-
-  save.onclick=()=>{
-    const xml=new XMLSerializer().serializeToString(svg);
-    const url=URL.createObjectURL(
-      new Blob([xml],{type:'image/svg+xml'})
-    );
-    const a=document.createElement('a');
-    a.href=url;
-    a.download='You-were-here.svg';
-    a.click();
-    setTimeout(()=>URL.revokeObjectURL(url),1500);
-  };
-
-  const letGo=document.createElement('button');
-  letGo.textContent='Let it go';
-  letGo.className='secondary';
-  letGo.onclick=()=>{
-    box.replaceChildren();
-    box.hidden=true;
-  };
-
-  box.append(save,letGo);
   box.hidden=false;
+  try{
+    const keepsake=await MPEReceipt.create(data);
+    box.append(keepsake.svg);
+    const note=document.createElement('p');
+    note.textContent='Your trace was accepted. Its moment is yet to come.';
+    box.append(note);
+    const save=document.createElement('button');
+    save.textContent='Save my keepsake SVG';
+    save.onclick=()=>MPEReceipt.download(keepsake.svg,data.id);
+    const letGo=document.createElement('button');
+    letGo.className='secondary';
+    letGo.textContent='Let it go';
+    letGo.onclick=()=>{box.replaceChildren();box.hidden=true};
+    box.append(save,letGo);
+  }catch(error){
+    // The submission has already been ACCEPTED. An unavailable QR must never
+    // cause a second offering or a misleading "submission uncertain" message.
+    const note=document.createElement('p');
+    note.textContent='Your trace was accepted, but its keepsake could not be prepared: '+error.message;
+    box.append(note);
+  }
 }
 
 async function offer(silent){
@@ -217,7 +165,7 @@ async function offer(silent){
     }
 
     $('entry').value='';
-    receipt(data);
+    await receipt(data);
     $('status').textContent=
       'Accepted · the memory will decide when it appears.';
     retry=null;
