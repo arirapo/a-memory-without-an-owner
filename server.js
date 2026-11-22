@@ -504,6 +504,37 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+
+  // Artist-only research instrument. Not linked from the public artwork.
+  // Its inputs are processed only in the browser; the existing /api/offer
+  // accepts only eight numerical features and a UUID.
+  if (req.method === 'GET' && p === '/experiment') {
+    if (!studioAuthorized(req)) return studioChallenge(res);
+
+    const fs = require('node:fs');
+    const path = require('node:path');
+
+    res.writeHead(200, {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options': 'nosniff',
+      'Referrer-Policy': 'no-referrer',
+      'Content-Security-Policy':
+        "default-src 'none'; " +
+        "script-src 'self' 'unsafe-inline'; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "connect-src 'self'; img-src 'self' blob: data:; " +
+        "media-src 'self' blob:; object-src 'none'; " +
+        "base-uri 'none'; frame-ancestors 'none'"
+    });
+
+    return res.end(
+      fs.readFileSync(
+        path.join(__dirname, 'experimental-offer.html')
+      )
+    );
+  }
+
   if (
     req.method === 'GET' &&
     p === '/leave-a-trace.html'
