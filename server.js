@@ -386,15 +386,52 @@ const server = http.createServer(async (req, res) => {
     return res.end(page);
   }
 
-  // Optional curated ghost photographs: read-only, exact filenames.
-  if (req.method === 'GET' && (p === '/ghost/R0012371.jpeg' || p === '/ghost/R0011165.jpeg')) {
+  // Public curated ghost list: random choices come from this manifest only.
+  // Keep the directory private by allowing only listed JPEG files.
+  if (req.method === 'GET' && p.startsWith('/ghost/')) {
     const fs = require('node:fs');
-    const file = require('node:path').join(__dirname, 'ghost', p.slice('/ghost/'.length));
+    const path = require('node:path');
+    const name = p.slice('/ghost/'.length);
+    let catalogue;
+
     try {
-      const bytes = fs.readFileSync(file);
-      res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Cache-Control': 'public, max-age=3600' });
+      catalogue = JSON.parse(fs.readFileSync(
+        path.join(__dirname, 'ghost', 'ghost-images.json'), 'utf8'
+      ));
+      if (catalogue.version !== 1 || catalogue.selection !== 'random' ||
+          !Array.isArray(catalogue.images) || catalogue.images.length > 100 ||
+          !catalogue.images.every(x => typeof x === 'string' && /^R\d{7}\.jpeg$/.test(x))) {
+        throw Error('invalid_ghost_manifest');
+      }
+    } catch (error) {
+      console.error('Ghost manifest:', error.code || error.message);
+      return json(res, 503, { error: 'ghost_manifest_unavailable' });
+    }
+
+    if (name === 'ghost-images.json') {
+      res.writeHead(200, {
+        'Content-Type': 'application/json; charset=utf-8',
+        'Cache-Control': 'no-store',
+        'X-Content-Type-Options': 'nosniff'
+      });
+      return res.end(JSON.stringify(catalogue));
+    }
+
+    if (!catalogue.images.includes(name)) {
+      return json(res, 404, { error: 'ghost_not_listed' });
+    }
+
+    try {
+      const bytes = fs.readFileSync(path.join(__dirname, 'ghost', name));
+      res.writeHead(200, {
+        'Content-Type': 'image/jpeg',
+        'Cache-Control': 'public, max-age=3600',
+        'X-Content-Type-Options': 'nosniff'
+      });
       return res.end(bytes);
-    } catch { return json(res, 404, { error: 'ghost_unavailable' }); }
+    } catch {
+      return json(res, 404, { error: 'ghost_unavailable' });
+    }
   }
 
   // Read-only public visual snapshot. No mutation or simulation.

@@ -22,7 +22,29 @@ const canvas=document.getElementById('art'),g=canvas.getContext('2d');
 const status=document.getElementById('status'),meta=document.getElementById('meta');
 let memory=null,phase=0,fieldCanvas=null,fieldKey='',photo=null,ghostCache=null;
 const clamp=(v,a=0,b=1)=>Math.max(a,Math.min(b,v));
-const ghost=new Image();ghost.onload=()=>{photo=ghost;ghostCache=null};ghost.src='/ghost/'+(Math.random()<.5?'R0012371.jpeg':'R0011165.jpeg');
+// Image choice only: preserve existing ghost processing and visual settings.
+const ghost=new Image();ghost.onload=()=>{photo=ghost;ghostCache=null};
+const ghostFallback=['R0012371.jpeg','R0011165.jpeg'];
+const randomGhost=a=>a[Math.floor(Math.random()*a.length)];
+async function chooseGhost(){
+  let images=ghostFallback;
+  try{
+    const response=await fetch('/ghost/ghost-images.json',{cache:'no-store'});
+    if(!response.ok)throw Error('Ghost manifest HTTP '+response.status);
+    const data=await response.json();
+    if(!Array.isArray(data.images)||!data.images.length)throw Error('Empty ghost manifest');
+    const filtered=data.images.filter(n=>typeof n==='string'&&/^R\d{7}\.jpeg$/.test(n));
+    if(!filtered.length)throw Error('Invalid ghost list');
+    images=filtered;
+  }catch(error){console.warn('Using original ghost fallback:',error.message)}
+  const selected=randomGhost(images);
+  ghost.onerror=()=>{
+    ghost.onerror=null;
+    if(!ghostFallback.includes(selected))ghost.src='/ghost/'+randomGhost(ghostFallback);
+  };
+  ghost.src='/ghost/'+selected;
+}
+chooseGhost();
 function buildField(){
   if(!memory?.deepField||memory.deepField.length!==2048)return;
   const key=memory.revision+'|'+memory.days;
