@@ -336,7 +336,7 @@ const server = http.createServer(async (req, res) => {
   ) {
     return json(res, 200, {
       status: 'ok',
-      version: '1.0.0-beta.1',
+      version: '1.2.0-experiment',
       startedAt,
       storage: store.mode
     });
@@ -508,6 +508,34 @@ const server = http.createServer(async (req, res) => {
   // Artist-only research instrument. Not linked from the public artwork.
   // Its inputs are processed only in the browser; the existing /api/offer
   // accepts only eight numerical features and a UUID.
+
+  // Static, same-origin assets for the experiment and receipt research.
+  if (req.method === 'GET' && [
+    '/mpe-qr.js','/receipt-kit.js','/receipt-poetry-lexicon.json','/receipt-lab'
+  ].includes(p)) {
+    const fs = require('node:fs');
+    const path = require('node:path');
+    const items = {
+      '/mpe-qr.js': ['mpe-qr.js','application/javascript; charset=utf-8'],
+      '/receipt-kit.js': ['receipt-kit.js','application/javascript; charset=utf-8'],
+      '/receipt-poetry-lexicon.json': ['receipt-poetry-lexicon.json','application/json; charset=utf-8'],
+      '/receipt-lab': ['receipt-lab.html','text/html; charset=utf-8']
+    };
+    const [filename,ctype] = items[p];
+    res.writeHead(200,{
+      'Content-Type': ctype,
+      'Cache-Control': 'no-store',
+      'X-Content-Type-Options':'nosniff',
+      'Referrer-Policy':'no-referrer',
+      'Content-Security-Policy':
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; " +
+        "style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; " +
+        "media-src 'self' blob:; connect-src 'self'; " +
+        "object-src 'none'; base-uri 'none'; frame-ancestors 'none'"
+    });
+    return res.end(fs.readFileSync(path.join(__dirname,filename)));
+  }
+
   if (req.method === 'GET' && p === '/experiment') {
     
 
