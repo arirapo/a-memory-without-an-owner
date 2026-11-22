@@ -1,38 +1,25 @@
-MPE 1.3 — SHARED I WAS HERE RECEIPT
+A MEMORY WITHOUT AN OWNER — GHOST MANIFEST UPDATE
 
-Upload to the ROOT of the existing GitHub repository:
-  receipt-kit.js      (REPLACE current version)
-  build-mpe13.js      (NEW)
+Contents:
+  ghost/ghost-images.json  — curated list of 13 JPEG images
+  build-mpe-ghost.js       — exact one-time update for current Node server and Living Memory page
 
-The other current files stay where they are. In particular:
-  mpe-qr.js
-  receipt-poetry-lexicon.json
-  experimental-offer.html
-  receipt-lab.html
-  server.js
+Install:
+1. Extract ZIP. Upload build-mpe-ghost.js to the root of arirapo/a-memory-without-an-owner on GitHub.
+2. Upload ghost-images.json to the existing ghost/ folder on GitHub. Do not remove images.
+3. On Mac Mini:
+   cd ~/mpe-production-05
+   git pull --rebase origin main
+   node build-mpe-ghost.js
+   node --check server.js
+   git add server.js living-memory.html
+   git commit -m "Use curated random ghost manifest"
+   git push origin main
+4. GoDaddy: Settings > Integrations > Pull from GitHub.
+5. Check /ghost/ghost-images.json, then reload / several times.
 
-After uploading to GitHub, on Mac Mini:
+The builder checks all 13 JPEG files before editing. It only changes the ghost-image serving section of server.js and the initial ghost-image selection in living-memory.html. The existing rendering, blur/opacity/darkening, memory engine, submission forms, and receipts are left intact.
 
-  cd ~/mpe-production-05
-  git pull --rebase origin main
-  node build-mpe13.js
-  node --check server.js
+In future, add a JPEG under ghost/ and add its filename to ghost/ghost-images.json. Each deployed image must use naming R + seven digits + .jpeg. Push and Pull from GitHub. No further code modifications needed.
 
-If successful:
-  git add leave-a-trace.html
-  git commit -m "Use shared I was here QR receipts on both offering pages"
-  git push origin main
-
-GoDaddy > Settings > Integrations > Pull from GitHub.
-
-Test:
-  /receipt-lab  (new quiet vertical imprint)
-  /experiment  (new quiet vertical imprint)
-  /offer       (shared QR keepsake after accepted text or silence)
-  /studio      (must remain password-protected)
-
-Important:
-  receipt-kit.js in GitHub is replaced BEFORE running build-mpe13.js;
-  only leave-a-trace.html is generated locally by the builder.
-  Do not repeat build-mpe13.js after success.
-  Memory engine, existing MySQL data and public artwork are NOT changed.
+Existing current files get local backups named .before-ghost-manifest; do not commit those backups.
